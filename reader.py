@@ -29,8 +29,24 @@ if __name__ == "__main__":
         datefmt="%H:%M:%S",
     )
     parser = argparse.ArgumentParser()
-    parser.add_argument('--host', help='foo help')
-    parser.add_argument('--port', help='foo help')
-    parser.add_argument('--out', help='foo help')
+    parser.add_argument('--host', help='host listen to')
+    parser.add_argument('--port', help='port')
+    parser.add_argument('--out', help='output file name')
     args = parser.parse_args()
-    asyncio.run(listen(args.host, args.port, args.out))
+
+    # default vars
+    if (host := args.host) is None:
+        host = "minechat.dvmn.org"
+    if (port := args.port) is None:
+        port = 5000
+    if (outfile := args.out) is None:
+        outfile = 'chat.history'
+
+    setup_text = (
+        "Setup",
+        f"Host: {host}",
+        f"Port: {port}",
+        f"Outfile: {outfile}"
+    )
+    logger.info("\n".join(setup_text))
+    asyncio.run(listen(host, port, outfile))
