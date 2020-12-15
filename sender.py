@@ -5,8 +5,26 @@ import logging
 import json
 
 logger = logging.getLogger(__name__)
+setup_text = """
+Host: {}
+Port: {}
+Token File: {}
+Username: {}
+Text: {}
+"""
+
+def timeout(n):
+    def wrapper(func):
+        async def wrapped(*args):
+            async def _func(*args):
+                return await func(*args)
+
+            return await asyncio.wait_for(_func(*args), n)
+        return wrapped
+    return wrapper
 
 
+@timeout(5)
 async def _read_and_write(reader, writer, msg):
     logger.debug((await reader.readline()).decode())
     writer.write(f"{msg}\n".encode())
@@ -70,6 +88,7 @@ async def authorize_user(connection, user_token):
 
 async def submit_message(connection, msg):
     reader, writer = connection
+    msg = msg.replace('\n', '\\n')
     await _read_and_write(reader, writer, f"{msg}\n")
 
 
@@ -88,8 +107,8 @@ async def start_chat_session(host, port, token_file, username, text):
             logger.info("INVALID TOKEN. Fix it or create new one.")
             return
 
-        if text:
-            await submit_message(connection, f"{text}\n")
+        if text and text != 'interactive':
+            await submit_message(connection, text)
             logger.info("Message was sent.")
             return
 
@@ -98,9 +117,12 @@ async def start_chat_session(host, port, token_file, username, text):
             msg = input("Type message to send or 'q' to exit: ")
             if msg == 'q':
                 break
-            await submit_message(connection, f"{msg}\n")
+            await submit_message(connection, msg)
+    except asyncio.exceptions.TimeoutError:
+        logger.info("Connection lost.")
     finally:
         writer.close()
+        logger.debug("Sender session closed.")
 
 
 if __name__ == "__main__":
@@ -111,31 +133,30 @@ if __name__ == "__main__":
         datefmt="%H:%M:%S",
     )
     parser = argparse.ArgumentParser()
-    parser.add_argument('--host', help='chat host')
-    parser.add_argument('--port', help='chat port')
-    parser.add_argument('--token', help='user token file')
-    parser.add_argument('--text', help='text to send')
-    parser.add_argument('--username', help='username to register')
-    args = parser.parse_args()
-
-    # default vars
-    if (host := args.host) is None:
-        host = "minechat.dvmn.org"
-    if (port := args.port) is None:
-        port = 5050
-    if (token_file := args.token) is None:
-        token_file = 'token.json'
-    if (username := args.username) is None:
-        username = "anonymous"
-
-    text = args.text
-    setup_text = (
-        "Setup",
-        f"Host: {host}",
-        f"Port: {port}",
-        f"Token File: {token_file}",
-        f"Username: {username}",
-        f"Text: {text if text else 'interactive'}\n"
+    parser.add_argument(
+        '--host', default="minechat.dvmn.org", help='chat host'
     )
-    logger.info("\n".join(setup_text))
-    asyncio.run(start_chat_session(host, port, token_file, username, text))
+    parser.add_argument(
+        '--port', default=5050, type=int, help='chat port'
+    )
+    parser.add_argument(
+        '--token', default='token.json', help='user token file'
+    )
+    parser.add_argument(
+        '--text', default='interactive', help='text to send'
+    )
+    parser.add_argument(
+        '--username', default="anonymous", help='username to register'
+    )
+    parser.add_argument(
+        '--debug', action='store_true', help='debug mode'
+    )
+    args = parser.parse_args()
+    # debug mode
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+
+    args = (args.host, args.port, args.token, args.username, args.text)
+
+    logger.info(setup_text.format(*args))
+    asyncio.run(start_chat_session(*args))
