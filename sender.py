@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import logging
 import json
+from utils import reconnect, timeout
 
 logger = logging.getLogger(__name__)
 setup_text = """
@@ -12,16 +13,6 @@ Token File: {}
 Username: {}
 Text: {}
 """
-
-def timeout(n):
-    def wrapper(func):
-        async def wrapped(*args):
-            async def _func(*args):
-                return await func(*args)
-
-            return await asyncio.wait_for(_func(*args), n)
-        return wrapped
-    return wrapper
 
 
 @timeout(5)
@@ -46,8 +37,9 @@ async def _get_user_token(token_file):
 
 
 async def register_user(host, port, username, token_file):
+    logger.debug("Trying to open register connection...")
+    reader, writer = await asyncio.open_connection(host, port)
     try:
-        reader, writer = await asyncio.open_connection(host, port)
         # skip welcome_text
         await _read_and_write(reader, writer, "")
         # send username
@@ -63,11 +55,13 @@ async def register_user(host, port, username, token_file):
             logger.info("User token file was created.")
 
         logger.info("User was registered.")
-        logger.debug("Register session closed.")
+        return user_token
+
+    except asyncio.exceptions.TimeoutError:
+        logger.info("Connection lost.")
     finally:
         writer.close()
-
-    return user_token
+        logger.debug("Register session closed.")
 
 
 async def authorize_user(connection, user_token):
@@ -92,14 +86,16 @@ async def submit_message(connection, msg):
     await _read_and_write(reader, writer, f"{msg}\n")
 
 
+@reconnect
 async def start_chat_session(host, port, token_file, username, text):
     user_token = await _get_user_token(token_file)
 
     if not user_token:
         user_token = await register_user(host, port, username, token_file)
 
+    logger.info("Trying to open chat connection...")
+    connection = await asyncio.open_connection(host, port)
     try:
-        connection = await asyncio.open_connection(host, port)
         _, writer = connection
         # try to auth
         user_authorized = await authorize_user(connection, user_token)
@@ -122,7 +118,7 @@ async def start_chat_session(host, port, token_file, username, text):
         logger.info("Connection lost.")
     finally:
         writer.close()
-        logger.debug("Sender session closed.")
+        logger.debug("Chat session closed.")
 
 
 if __name__ == "__main__":
